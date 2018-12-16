@@ -9,8 +9,8 @@ set.seed(1)
 
 # Input data
 # Decide to use either Normal or Location-Scale-t 
-# y=rnorm(100,0,1) #Normal data
-y=rst(100,0,1,10) #Student-t data
+y=rnorm(1000,0,1) #Normal data
+# y=rst(100,0,1,5) #Student-t data
 plot(y)
 
 # Set priors
