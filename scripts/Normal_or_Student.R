@@ -21,14 +21,10 @@ sigma_prior <- c(1) #prior parameters for sigma #Assume that sigma is distributi
 df_prior <- c(3,30) #prior parameters for df
 
 # Need to write a function to evaluate half-normal distribution
-dhalfnorm <- function(y,scale_halfnorm,log){
+dhalfnorm <- function(y,scale_halfnorm,log=c(TRUE,FALSE)){
   if(log=="TRUE"){
     den_halfnorm <- log(2*dnorm(y,0,scale_halfnorm))
-  }
-  else if(log=="FALSE"){
-    den_halfnorm <- 2*dnorm(y,0,scale_halfnorm)
-  }
-  else {
+  } else {
     den_halfnorm <- 2*dnorm(y,0,scale_halfnorm)
   }
   return(den_halfnorm)
