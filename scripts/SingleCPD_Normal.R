@@ -11,19 +11,20 @@ Data=""
 # Or simulated data
 cp <- 5
 y1 <- rnorm(cp,0,1)
-y2 <- rnorm(cp,0,2)
+y2 <- rnorm(cp,1,1)
 
 y <- c(y1,y2) ; plot(y)
 
-approx_samples <- 10000
+approx_samples <- 1000
 
 # prior for parameter
-mu_prior <- c(0,3) #Normal distribution
+mu_prior <- c(0,0.3) #Normal distribution #Mu is conditional on sigma i.e sigma^2/kappa #unless we choose known sigma 
 sigma_prior <- c(5,0.6) #Use Scaled-Inverse-Chi-Squared for Conjugacy (df_para,scale_para) - mean of c(5,0.6) = 1
+model_prior <- c(0.5,0.5)
 
-proposal_sd_rj <- 0.2 #bigger jump for the reversible jump
+proposal_sd_rj <- 0.3 #bigger jump for the reversible jump
 proposal_sd_wm <- 0.1 #within model sample of parameters
-sims <- 100000
+sims <- 200000
 perc_burnin <- 0.1
 num_of_cps_list <- rep(NA,sims)
 mu_list <- list() #to assign to this list, use [[]]
@@ -41,6 +42,8 @@ cpd_test <- as.numeric(readline(prompt = "Unknown Mu(1), Unknown Sigma(2), Unkno
 if (cpd_test==1){ #Unknown Mu, known sigma^2
   # Use approximation using samples from prior, reversible jump, and analytical
   known_sigma <- as.numeric(readline(prompt = "Known sigma: "))
+  mu_prior[1] <- as.numeric(readline(prompt = "Prior Mean: "))
+  mu_prior[2] <- as.numeric(readline(prompt = "Prior std: "))
   
   # Before anything, define function for product of normals
   prod_norm <- function(mu,sigma,y){prod(dnorm(y,mu,sigma))}
@@ -380,23 +383,37 @@ if (cpd_test==1){ #Unknown Mu, known sigma^2
     }
   }
   # Use approximation, i.e integrate over all mu and sigma
-  # ######Need to add approximation for both mu and sigma
   # Marginal likelihood P(Y|M_0)
   test_sigma_M0 <- sqrt(rscaleinvchi(approx_samples,sigma_prior[1],sigma_prior[2]))
-  test_sigma_M0_matrix <- matrix(test_sigma_M0,nrow = approx_samples,ncol = length(test_sigma_M0),byrow = TRUE)
-  test_mu_M0 <- rnorm(approx_samples,mu_prior[1],mu_prior[2])
-  pM0 <- list()
-  for (i in 1:100) {
-    pM0[i] <- mean(sapply(test_mu_M0,prod_norm,test_sigma_M0[i],y))
+  test_mu_M0 <- list()
+  for (i in 1:length(test_sigma_M0)) {
+    test_mu_M0[[i]] <- rnorm(approx_samples,mu_prior[1],sqrt(test_sigma_M0[i]^2/mu_prior[2]))
   }
-  
-  pM0 <- mean(sapply(rnorm(approx_samples,mu_prior[1],mu_prior[2]),prod_norm,known_sigma,y))
+  pM0 <- list()
+  for (i in 1:approx_samples) {
+    pM0[[i]] <- mean(sapply(test_mu_M0[[i]],prod_norm,test_sigma_M0[i],y))
+  }
+  pM0 <- mean(unlist(pM0))
   # Marginal Likelihood P(Y|M_1)
-  pM1 <- mean(sapply(rnorm(approx_samples,mu_prior[1],mu_prior[2]),prod_norm,known_sigma,y[1:cp]))*mean(sapply(rnorm(approx_samples,mu_prior[1],mu_prior[2]),prod_norm,known_sigma,y[(cp+1):(2*cp)]))
+  test_sigma_M1_1 <- sqrt(rscaleinvchi(approx_samples,sigma_prior[1],sigma_prior[2]))
+  test_mu_M1_1 <- list()
+  for (i in 1:length(test_sigma_M1_1)) {
+    test_mu_M1_1[[i]] <- rnorm(approx_samples,mu_prior[1],sqrt(test_sigma_M1_1[i]^2/mu_prior[2]))
+  }
+  test_sigma_M1_2 <- sqrt(rscaleinvchi(approx_samples,sigma_prior[1],sigma_prior[2]))
+  test_mu_M1_2 <- list()
+  for (i in 1:length(test_sigma_M1_2)) {
+    test_mu_M1_2[[i]] <- rnorm(approx_samples,mu_prior[1],sqrt(test_sigma_M1_2[i]^2/mu_prior[2]))
+  }
+  pM1 <- list()
+  for (i in 1:approx_samples) {
+    pM1[[i]] <- mean(sapply(test_mu_M1_1[[i]],prod_norm,test_sigma_M1_1[i],y[1:cp]))*mean(sapply(test_mu_M1_2[[i]],prod_norm,test_sigma_M1_2[i],y[(cp+1):(2*cp)]))
+  }
+  pM1 <- mean(unlist(pM1))
   # Normalise
   total <- pM0+pM1
-  pM0 <- pM0/total
-  pM1 <- pM1/total
+  pM0 <- pM0/total #Not accurate due to the number of samples required for a good approximation
+  pM1 <- pM1/total #
   # Store results in data frame
   results <- data.frame("Approx"=c(pM0,pM1))
   
@@ -418,70 +435,110 @@ if (cpd_test==1){ #Unknown Mu, known sigma^2
     if (num_of_cps==0) {
       u1 <- rnorm(1,0,proposal_sd_rj)
       u2 <- rnorm(1,0,proposal_sd_rj)
+      u3 <- rnorm(1,0,proposal_sd_rj)
+      u4 <- rnorm(1,0,proposal_sd_rj)
       
       new_mu_left <- mean(y[1:cp])+u1
       new_mu_right <- mean(y[(cp+1):(2*cp)])+u2
       
-      old_prior <- dnorm(mu,mu_prior[1],mu_prior[2],log = TRUE)
-      new_prior <- dnorm(new_mu_left,mu_prior[1],mu_prior[2],log = TRUE) + dnorm(new_mu_right,mu_prior[1],mu_prior[2],log = TRUE)
+      temp_sigma_left <- var(y[1:cp])+u3
+      temp_sigma_right <- var(y[(cp+1):(2*cp)])+u4
       
-      old_like <- sum(dnorm(y,mu,known_sigma,log = TRUE))
-      new_like <- sum(dnorm(y[1:cp],new_mu_left,known_sigma,log = TRUE))+sum(dnorm(y[(cp+1):(2*cp)],new_mu_right,known_sigma,log = TRUE))
-      
-      old_to_new <- dnorm(u1,0,proposal_sd_rj,log = TRUE)+dnorm(u2,0,proposal_sd_rj,log = TRUE)
-      new_to_old <- dnorm(mean(y)-mu,0,proposal_sd_rj,log = TRUE)
-      if (runif(1)<exp(new_like+new_prior+new_to_old-old_like-old_prior-old_to_new)) {
-        num_of_cps <- 1
-        mu <- c(new_mu_left,new_mu_right)
+      if (temp_sigma_left<=0|temp_sigma_right<=0) {
+      } else {
+        new_sigma_left <- sqrt(var(y[1:cp])+u3)
+        new_sigma_right <- sqrt(var(y[(cp+1):(2*cp)])+u4)
+        
+        old_prior <- dnorm(mu,mu_prior[1],sqrt(sigma^2/mu_prior[2]),log = TRUE) + dscaleinvchi(sigma^2,sigma_prior[1],sigma_prior[2],log = TRUE)
+        new_prior <- dnorm(new_mu_left,mu_prior[1],sqrt(new_sigma_left^2/mu_prior[2]),log = TRUE) + dscaleinvchi(new_sigma_left^2,sigma_prior[1],sigma_prior[2],log = TRUE) + dnorm(new_mu_right,mu_prior[1],sqrt(new_sigma_right^2/mu_prior[2]),log = TRUE) ++ dscaleinvchi(new_sigma_right^2,sigma_prior[1],sigma_prior[2],log = TRUE)
+        
+        old_like <- sum(dnorm(y,mu,sigma,log = TRUE))
+        new_like <- sum(dnorm(y[1:cp],new_mu_left,new_sigma_left,log = TRUE))+sum(dnorm(y[(cp+1):(2*cp)],new_mu_right,new_sigma_right,log = TRUE))
+        
+        old_to_new <- dnorm(u1,0,proposal_sd_rj,log = TRUE)+dnorm(u2,0,proposal_sd_rj,log = TRUE) + dnorm(u3,0,proposal_sd_rj,log = TRUE) +dnorm(u4,0,proposal_sd_rj,log = TRUE)
+        new_to_old <- dnorm(mean(y)-mu,0,proposal_sd_rj,log = TRUE) + dnorm(var(y)-sigma^2,0,proposal_sd_rj,log = TRUE)
+        if (runif(1)<exp(new_like+new_prior+new_to_old-old_like-old_prior-old_to_new)) {
+          num_of_cps <- 1
+          mu <- c(new_mu_left,new_mu_right)
+          sigma <- c(new_sigma_left,new_sigma_right)
+        }
       }
     } else { 
       # We are in the one changepoint model
-      u <- rnorm(1,0,proposal_sd_rj)
+      u1 <- rnorm(1,0,proposal_sd_rj)
+      u2 <- rnorm(1,0,proposal_sd_rj)
       
-      new_mu <- mean(y)+u
+      new_mu <- mean(y)+u1
+      temp_sigma <- var(y)+u2
       
-      old_prior <- dnorm(mu[1],mu_prior[1],mu_prior[2],log = TRUE)+dnorm(mu[2],mu_prior[1],mu_prior[2],log = TRUE)
-      new_prior <- dnorm(new_mu,mu_prior[1],mu_prior[2],log = TRUE)
-      
-      old_like <- sum(dnorm(y[1:cp],mu[1],known_sigma,log = TRUE))+sum(dnorm(y[(cp+1):(2*cp)],mu[2],known_sigma,log = TRUE))
-      new_like <- sum(dnorm(y,new_mu,known_sigma,log = TRUE))
-      
-      old_to_new <- dnorm(u,0,proposal_sd_rj,log = TRUE)
-      new_to_old <- dnorm(mu[1]-mean(y[1:cp]),0,proposal_sd_rj,log = TRUE)+dnorm(mu[2]-mean(y[(cp+1):(2*cp)]),0,proposal_sd_rj,log = TRUE)
-      
-      if (runif(1)< exp(new_like+new_prior-old_like-old_prior+new_to_old-old_to_new)) {
-        mu <- new_mu
-        num_of_cps <- 0
+      if (temp_sigma<=0) {
+      } else {
+        new_sigma <- sqrt(var(y)+u2)
+        
+        old_prior <- dnorm(mu[1],mu_prior[1],sqrt(sigma[1]^2/mu_prior[2]),log = TRUE) + dscaleinvchi(sigma[1]^2,sigma_prior[1],sigma_prior[2],log = TRUE)+dnorm(mu[2],mu_prior[1],sqrt(sigma[2]^2/mu_prior[2]),log = TRUE)+ dscaleinvchi(sigma[2]^2,sigma_prior[1],sigma_prior[2],log = TRUE)
+        new_prior <- dnorm(new_mu,mu_prior[1],sqrt(new_sigma^2/mu_prior[2]),log = TRUE) + dscaleinvchi(new_sigma^2,sigma_prior[1],sigma_prior[2],log = TRUE)
+        
+        old_like <- sum(dnorm(y[1:cp],mu[1],sigma[1],log = TRUE))+sum(dnorm(y[(cp+1):(2*cp)],mu[2],sigma[2],log = TRUE))
+        new_like <- sum(dnorm(y,new_mu,new_sigma,log = TRUE))
+        
+        old_to_new <- dnorm(u1,0,proposal_sd_rj,log = TRUE) + dnorm(u2,0,proposal_sd_rj,log = TRUE)
+        new_to_old <- dnorm(mu[1]-mean(y[1:cp]),0,proposal_sd_rj,log = TRUE)+ dnorm(var(y[1:cp])-sigma[1]^2,0,proposal_sd_rj,log = TRUE) + dnorm(mu[2]-mean(y[(cp+1):(2*cp)]),0,proposal_sd_rj,log = TRUE) + dnorm(var(y[(cp+1):(2*cp)])-sigma[2]^2,0,proposal_sd_rj,log = TRUE)
+        
+        if (runif(1)< exp(new_like+new_prior-old_like-old_prior+new_to_old-old_to_new)) {
+          mu <- new_mu
+          sigma <- new_sigma
+          num_of_cps <- 0
+        }
       }
     }
     # Resample mu parameter from posterior, use Metropolis Hastings
     if (num_of_cps==0) {
-      u <- rnorm(1,0,proposal_sd_wm)
-      new_mu <- mu+u
+      u1 <- rnorm(1,0,proposal_sd_wm)
+      u2 <- rnorm(1,0,proposal_sd_wm)
       
-      old_prior <- dnorm(mu,mu_prior[1],mu_prior[2],log = TRUE)
-      new_prior <- dnorm(new_mu,mu_prior[1],mu_prior[2],log = TRUE)
+      new_mu <- mu+u1
+      temp_sigma <- sigma^2+u2
       
-      old_like <- sum(dnorm(y,mu,known_sigma,log = TRUE))
-      new_like <- sum(dnorm(y,new_mu,known_sigma,log = TRUE))
-      # Symmetric proposal so no transition probability
-      if (runif(1)<exp(new_like+new_prior-old_prior-old_like)) {
-        mu <- new_mu
+      if (temp_sigma<=0) {
+      } else{
+        new_sigma <- sqrt(sigma^2+u2)
+        
+        old_prior <- dnorm(mu,mu_prior[1],sqrt(sigma^2/mu_prior[2]),log = TRUE) + dscaleinvchi(sigma^2,sigma_prior[1],sigma_prior[2],log = TRUE)
+        new_prior <- dnorm(new_mu,mu_prior[1],sqrt(new_sigma^2/mu_prior[2]),log = TRUE) + dscaleinvchi(new_sigma^2,sigma_prior[1],sigma_prior[2],log = TRUE)
+        
+        old_like <- sum(dnorm(y,mu,sigma,log = TRUE))
+        new_like <- sum(dnorm(y,new_mu,new_sigma,log = TRUE))
+        # Symmetric proposal so no transition probability
+        if (runif(1)<exp(new_like+new_prior-old_prior-old_like)) {
+          mu <- new_mu
+          sigma <- new_sigma
+        }
       }
     } else{
       u1 <- rnorm(1,0,proposal_sd_wm)
       u2 <- rnorm(1,0,proposal_sd_wm)
+      u3 <- rnorm(1,0,proposal_sd_wm)
+      u4 <- rnorm(1,0,proposal_sd_wm)
+      
       new_mu_left <- mu[1]+u1
       new_mu_right <- mu[2]+u2
-      
-      old_prior <- dnorm(mu[1],mu_prior[1],mu_prior[2],log = TRUE)+dnorm(mu[2],mu_prior[1],mu_prior[2],log = TRUE)
-      new_prior <- dnorm(new_mu_left,mu_prior[1],mu_prior[2],log = TRUE)+dnorm(new_mu_right,mu_prior[1],mu_prior[2],log = TRUE)
-      
-      old_like <- sum(dnorm(y[1:cp],mu[1],known_sigma,log = TRUE))+sum(dnorm(y[(cp+1):(2*cp)],mu[2],known_sigma,log = TRUE))
-      new_like <- sum(dnorm(y[1:cp],new_mu_left,known_sigma,log = TRUE))+sum(dnorm(y[(cp+1):(2*cp)],new_mu_right,known_sigma,log = TRUE))
-      # Symmetric proposal so no transition probability
-      if (runif(1)<exp(new_like+new_prior-old_prior-old_like)) {
-        mu <- c(new_mu_left,new_mu_right)
+      temp_sigma_left <- sigma[1]^2+u3
+      temp_sigma_right <- sigma[2]^2+u4
+      if (temp_sigma_left<=0|temp_sigma_right<=0) {
+      } else{
+        new_sigma_left <- sqrt(sigma[1]^2+u3)
+        new_sigma_right <- sqrt(sigma[2]^2+u4)
+        
+        old_prior <- dnorm(mu[1],mu_prior[1],sqrt(sigma[1]^2/mu_prior[2]),log = TRUE) + dscaleinvchi(sigma[1]^2,sigma_prior[1],sigma_prior[2],log = TRUE)+dnorm(mu[2],mu_prior[1],sqrt(sigma[2]^2/mu_prior[2]),log = TRUE) + dscaleinvchi(sigma[2]^2,sigma_prior[1],sigma_prior[2],log = TRUE)
+        new_prior <- dnorm(new_mu_left,mu_prior[1],sqrt(new_sigma_left^2/mu_prior[2]),log = TRUE) + dscaleinvchi(new_sigma_left^2,sigma_prior[1],sigma_prior[2],log = TRUE)+dnorm(new_mu_right,mu_prior[1],sqrt(new_sigma_right^2/mu_prior[2]),log = TRUE) + dscaleinvchi(new_sigma_right^2,sigma_prior[1],sigma_prior[2],log = TRUE)
+        
+        old_like <- sum(dnorm(y[1:cp],mu[1],sigma[1],log = TRUE))+sum(dnorm(y[(cp+1):(2*cp)],mu[2],sigma[2],log = TRUE))
+        new_like <- sum(dnorm(y[1:cp],new_mu_left,new_sigma_left,log = TRUE))+sum(dnorm(y[(cp+1):(2*cp)],new_mu_right,new_sigma_right,log = TRUE))
+        # Symmetric proposal so no transition probability
+        if (runif(1)<exp(new_like+new_prior-old_prior-old_like)) {
+          mu <- c(new_mu_left,new_mu_right)
+          sigma <- c(new_sigma_left,new_sigma_right)
+        }
       }
     }
     #now resample mu from its posterior
@@ -516,16 +573,20 @@ if (cpd_test==1){ #Unknown Mu, known sigma^2
   # We need to calculate marginal likelihood since p(M0|Y) proportional to p(Y|M0)p(M0) and p(M1|Y) proportional to p(Y|M1)p(M1)
   
   # Write function for Marginal likelihood
-  marg_like_mu <- function(y,sigma,mu_0,sigma_0){
-    return((sigma/(((sqrt(2*pi)*sigma)^length(y))*sqrt(length(y)*sigma_0^2+sigma^2)))*exp(-(sum(y^2)/(2*sigma^2))-(mu_0^2/(2*sigma_0^2)))*exp(((sigma_0^2*length(y)^2*mean(y)^2/sigma^2)+((sigma^2*mu_0^2)/sigma_0^2)+(2*length(y)*mean(y)*mu_0))/(2*(length(y)*sigma_0^2+sigma^2))))              
+  marg_like <- function(y,mu_prior,sigma_prior){
+    df_n <- sigma_prior[1]+length(y)
+    kappa_n <- mu_prior[2]+length(y)
+    mu_n <- (mu_prior[2]*mu_prior[1]+length(y)*mean(y))/kappa_n
+    scale_n <- (1/df_n)*(sigma_prior[1]*sigma_prior[2]+sum((y-mean(y))^2)+((length(y)*mu_prior[2])/(mu_prior[2]+length(y)))*(mu_prior[1]-mean(y))^2)
+    return((1/(pi^(length(y)/2)))*(sqrt(mu_prior[2]/kappa_n))*(gamma(df_n/2)/gamma(sigma_prior[1]/2))*((sigma_prior[1]*sigma_prior[2])^(sigma_prior[1]/2))/(df_n*scale_n)^(df_n/2))
   }
   
   # For model M0, no changepoint
   # marg_like_M0 <- (known_sigma/((sqrt(2*pi)*known_sigma)*sqrt(length(y)*mu_prior[2]^2+known_sigma^2)))*exp(-(sum(y^2)/(2*known_sigma^2))-(mu_prior[1]^2/(2*mu_prior[2]^2)))*exp(((mu_prior[2]^2*length(y)^2*mean(y)^2/known_sigma^2)+((known_sigma^2*mu_prior[1]^2)/mu_prior[2]^2)+(2*length(y)*mean(y)*mu_prior[1]))/(2*(length(y)*mu_prior[2]^2+known_sigma^2)))              
-  marg_like_M0 <- marg_like_mu(y,known_sigma,mu_prior[1],mu_prior[2])
+  marg_like_M0 <- model_prior[1]*marg_like(y,mu_prior,sigma_prior)
   
   # For model M1, one changepoint
-  marg_like_M1 <- marg_like_mu(y[1:cp],known_sigma,mu_prior[1],mu_prior[2])*marg_like_mu(y[(cp+1):(2*cp)],known_sigma,mu_prior[1],mu_prior[2])
+  marg_like_M1 <- model_prior[2]*marg_like(y[1:cp],mu_prior,sigma_prior)*marg_like(y[(cp+1):(2*cp)],mu_prior,sigma_prior)
   
   total_marg <- marg_like_M0+marg_like_M1
   
