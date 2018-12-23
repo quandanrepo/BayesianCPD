@@ -6,7 +6,7 @@
 
 rm(list = ls())
 
-set.seed(1)
+set.seed(3)
 
 Data = ""
 
@@ -23,12 +23,10 @@ y <- c(rnorm(cp,0,1),rnorm(cp,1,1)) ; plot(y)
 #Unknown mean, Unknown sigma
 
 # prior for parameter
-mu_prior <- c(0,0.3) #Normal distribution #Mu is conditional on sigma i.e sigma^2/kappa #unless we choose known sigma 
+mu_prior <- c(0,0.3) #Normal distribution #Mu is conditional on sigma i.e sigma^2/kappa #unless we choose unknown mean and known sigma (1)
 sigma_prior <- c(5,0.6) #Use Scaled-Inverse-Chi-Squared for Conjugacy (df_para,scale_para) - mean of c(5,0.6) = 1
 tau_prior <- function(tau,y,log=c(TRUE,FALSE)){ #Just assume uniform for now
-  if (tau<1) {
-    return(0)
-  } else if (tau>(length(y)-1)){
+  if (tau<1|tau>(length(y)-1)){
     return(0)
   } else {
     if (log) {
@@ -41,12 +39,19 @@ tau_prior <- function(tau,y,log=c(TRUE,FALSE)){ #Just assume uniform for now
 
 proposal_sd_rj <- 0.3 #bigger jump for the reversible jump
 proposal_sd_wm <- 0.1 #within model sample of parameters
-tau_lambda <- 1 # lambda for poisson jump 
-sims <- 300000 
-approx_samples <- 1000 #Number of samples for monte carlo estimate, although we probably dont need it for this method
+tau_lambda <- 2 # lambda for poisson jump 
+sims <- 100000 
+# approx_samples <- 1000 #Number of samples for monte carlo estimate, although we probably dont need it for this method
 perc_burnin <- 0.1
+thin_every <- 5 # Add thinning as there might be autocorrelation since alot of proposals will get rejected due to out of bounds proposals for tau
 proposal_tau <- function(tau,tau_lambda){
-  return(tau+(((-1)^(sample(0:1,1)))*rpois(1,tau_lambda)))
+  # return(tau+(((-1)^(sample(0:1,1)))*rpois(1,tau_lambda)))
+  # return(sample(1:9,1))
+  if (tau==4) {
+    return(5)
+  } else {
+    return(4)
+  }
 }
 
 # Set up parameters to store
@@ -58,7 +63,8 @@ segment_1 <- list()
 segment_2 <- list()
 
 # Initialisation
-tau <- sample(1:(length(y)-1),1)
+# tau <- sample(1:(length(y)-1),1) 
+tau <- sample(4:5,1) #just run Gibbs on two models
 mu <- mean(y)
 sigma <- sqrt(var(y))
 
@@ -78,10 +84,12 @@ if (cpd_test==1){ #Unknown Mu, known sigma^2
   for (i in 1:(length(y)-1)) {
     marg_like[i] <- marg_like_mu(y[1:i],known_sigma,mu_prior[1],mu_prior[2])*marg_like_mu(y[(i+1):(length(y))],known_sigma,mu_prior[1],mu_prior[2])
   }
+  # marg_like <- marg_like[-1]
   marg_like <- marg_like/sum(marg_like)
   
   plot(marg_like)
   lines(marg_like)
+  par(mfrow=c(2,1)) #have 2 plots in same space
   
   results <- data.frame("Analytical"=marg_like)
   
@@ -108,25 +116,33 @@ if (cpd_test==1){ #Unknown Mu, known sigma^2
     #Resample tau using Metropolis hasting
     #Propose a new tau usings a symmetric proposal so no transition ratio
     pro_tau <- proposal_tau(tau,tau_lambda)
-    if (pro_tau<1) {
-      
-    } else if (pro_tau>(length(y)-1)) {
-      
-    }else{
-      
-      old_like <- sum(dnorm(y[1:tau],segment_1[[s]],known_sigma,log = TRUE)) + sum(dnorm(y[(tau+1):length(y)],segment_2[[s]],known_sigma,log = TRUE))
-      new_like <- sum(dnorm(y[1:pro_tau],segment_1[[s]],known_sigma,log = TRUE)) + sum(dnorm(y[(pro_tau+1):length(y)],segment_2[[s]],known_sigma,log = TRUE))
-      
-      old_prior <- tau_prior(tau,y,log = TRUE)
-      new_prior <- tau_prior(pro_tau,y,log = TRUE)
-      
-      if (runif(1)<new_like+new_prior-old_like-old_prior) {
-        tau <- pro_tau
-      }
+    
+    while (pro_tau<1|pro_tau>(length(y)-1)) {
+      pro_tau <- proposal_tau(tau,tau_lambda)
     }
+    
+    old_like <- sum(dnorm(y[1:tau],segment_1[[s]],known_sigma,log = TRUE)) + sum(dnorm(y[(tau+1):length(y)],segment_2[[s]],known_sigma,log = TRUE))
+    new_like <- sum(dnorm(y[1:pro_tau],segment_1[[s]],known_sigma,log = TRUE)) + sum(dnorm(y[(pro_tau+1):length(y)],segment_2[[s]],known_sigma,log = TRUE))
+    
+    old_prior <- tau_prior(tau,y,log = TRUE)
+    new_prior <- tau_prior(pro_tau,y,log = TRUE)
+    
+    if (runif(1)<new_like+new_prior-old_like-old_prior) {
+      tau <- pro_tau
+    }
+    
     tau_list[[s]] <- tau
   }
+  tau_list <- tau_list[-(1:(perc_burnin*sims))]
+  tau_freq <- as.data.frame(table(factor(unlist(tau_list[seq(1,length(tau_list),thin_every)]))))
+  tau_den <- tau_freq[,2]/sum(tau_freq[,2])
   
+  plot(marg_like)
+  lines(marg_like)
+  plot(tau_den)
+  lines(tau_den)
+  
+  results <- cbind(results,"Gibbs+MH"=c(tau_freq[,2]))
   
 } else if (cpd_test==2) {#Known mu, unknown sigma^2
   
