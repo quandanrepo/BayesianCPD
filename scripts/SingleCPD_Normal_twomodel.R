@@ -103,14 +103,14 @@ for (s in 1:sims) {
   #Resample tau using Metropolis hasting
   #Propose a new tau usings a symmetric proposal so no transition ratio
   pro_tau <- proposal_tau(tau)
-  
+
   old_like <- sum(dnorm(y[1:tau],new_mu_left,known_sigma,log = TRUE)) + sum(dnorm(y[(tau+1):length(y)],new_mu_right,known_sigma,log = TRUE))
   new_like <- sum(dnorm(y[1:pro_tau],new_mu_left,known_sigma,log = TRUE)) + sum(dnorm(y[(pro_tau+1):length(y)],new_mu_right,known_sigma,log = TRUE))
-  
-  if (runif(1)<new_like-old_like) {
+
+  if (runif(1)<exp(new_like-old_like)) {
     tau <- pro_tau
   }
-  
+
   tau_list[[s]] <- tau
   mu_list[[s]] <- c(new_mu_left,new_mu_right)
 }
