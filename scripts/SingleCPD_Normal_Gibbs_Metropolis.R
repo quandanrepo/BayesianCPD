@@ -11,13 +11,13 @@
 
 rm(list = ls())
 
-set.seed(2)
+set.seed(1)
 
 # Data = "data/coal.csv"
 
 # Currently use simulated data
 
-cp <- 20
+cp <- 10
 
 y <- c(rnorm(cp,1,1),rnorm(cp,1,2))
 # y <- read.csv(Data)
@@ -56,11 +56,11 @@ perc_burnin <- 0.1
 thin_every <- 5 # Add thinning as there might be autocorrelation since alot of proposals will get rejected due to out of bounds proposals for tau
 proposal_tau <- function(tau,tau_lambda,large_jump){
   if (runif(1)<large_jump) {
-    return(tau+(((-1)^(sample(0:1,1)))*rpois(1,tau_lambda[1])))
-  } else{
     return(tau+(((-1)^(sample(0:1,1)))*rpois(1,tau_lambda[2])))
+  } else{
+    return(tau+(((-1)^(sample(0:1,1)))*rpois(1,tau_lambda[1])))
   }
-  # return(sample(1:9,1))
+  # return(sample(1:(length(y)-1),1))
 }
 
 # Set up parameters to store
